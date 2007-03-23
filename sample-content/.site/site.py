@@ -30,36 +30,44 @@ class baseSite(icesite):
 
     def traverse(self):
         title = "Ice web application"
-        if self.node('packages'):
+        if self.node('home'):
+            self["package-path"] = self.pathToHere
+        elif self.node('packages'):
             title = "Packages"
-            if self.node('courseware'):
-                if self.renode( '^.*$', 'deptname' ):
-                    if self.renode( '^.*$', 'coursecode' ):
-                        if self.renode( '^\d\d\d\d$', 'year' ):
-                            if self.renode( '^s\d$', 'semester' ):
-                                self["package-path"] = self.pathToHere
-            elif self.renode('^.*$', 'code'):
-                ##HACK: These are required until we refactor the coursenode() method
-                #self['coursecode'] = ''
-                #self['deptname'] = ''
-                #self['facname'] = ''
-                #self['year'] = ''
-                #self['semester'] = ''
+            if self.renode('^.*$', 'code'):
                 self["package-path"] = self.pathToHere
+        elif self.node('public'):
+            title = "Public"
+            if self.node('packages'):
+                title = "Public"
+                if self.renode('^.*$', 'code'):
+                    self["package-path"] = self.pathToHere           
+        elif self.node('teams'):
+            title = "Teams"
+            if self.node('packages'):
+                title = "Teams"
+                if self.renode('^.*$', 'code'):
+                    self["package-path"] = self.pathToHere
         elif self.node('courseware'):
-            title = 'Courseware'
-            if self.node('faculty'):
-                if self.renode('^.+$', 'facname'):
-                    title = self.getFacultyName(self['facname'])
-                    if self.renode('^.+$', 'deptname'):
-                        self["deptname"] = self["deptname"].upper()
-                        title = self.getDepartmentName(self['deptname'])
-                        if self.renode('^\d\d\d\d$', 'coursecode'):
-                            if self.renode('^\d\d\d\d$', 'year'):
-                                if self.renode('^s\d$', 'semester'):
-                                    self["semester"] = self["semester"].upper() 
-                                    self["package-path"] = self.pathToHere
-        
+            title = "Courseware"
+            if self.renode('^.*$', 'deptname'):
+                title = self["deptname"].upper()
+                self["deptname"] = self["deptname"].upper()
+                if self.renode('^.*$', 'coursecode'):
+                    title = self["deptname"].upper() + self["coursecode"].upper() 
+                    self["coursecode"] = self["coursecode"].upper()
+                    if self.renode('^.*$', 'year'):
+                        title = self["deptname"].upper() + self["coursecode"].upper() + " " + self["year"]
+                        if self.renode('^.*$', 'semester'):
+                            self["semester"] = self["semester"].upper()
+                            self["package-path"] = self.pathToHere
+                            self["isCourseware"] = True
+        elif self.renode('^.*$', 'code'):
+            if self.node('packages'):
+                title = "Packages"
+                if self.renode('^.*$', 'code'):
+                    self["package-path"] = self.pathToHere
+
         if self["package-path"] and self.rep.isdir(self["package-path"])==True:
             packageNode = True
         else:
@@ -81,20 +89,122 @@ class baseSite(icesite):
 
 # ++++ Extra ICE Function ++++
 
-from ice_functions import addFunction, removeFunction, replaceFunction, getFunction, packageOnly, itemOnly, packageRootOnly
+from ice_functions import *
+def displayIf(self):
+    return self.xhtmlTemplate != "template.xhtml"
+addFunction(func=mailThis, position=15, postRequired=True, label="Email", title="Email this", displayIf=displayIf)
 
-#Sample local (Ice) function
-def sampleFunction(self):
-    print "sampleFunction()"
-    l = self.rep.listdir(self["package-path"] + "/.skin/templates")
-    s = ""
-    for i in l:
-        s += os.path.splitext(i)[0] + "<br/>"
-    self['body'] = s
-    self['statusbar'] = "Sample status bar text!<br/>The end."
-#addFunction(sampleFunction, position=19, postRequired=False, label="Sample", title="Just a simple sample function")
+global refresh
+refresh = getFunction("refresh")
+
+global check_links
+check_links = getFunction("check_links")
 
 
+global export
+def export(self, exportBaseName=None, exportCallback=None):
+    import ice_export
+    refresh(self)
+    fileName = None
+    templateName = os.path.split(self.xhtmlTemplate)[1]
+    templateName = os.path.splitext(templateName)[0]
+    
+    toRepository = False
+    deleteFirst = False
+    exportHomeAlso = False
+ 
+    print "Exporting"
+    
+    if self.has_key("isCourseware"):
+        path = self["package-path"]
+        print "Path: %s" % path
+        try:
+            exportBaseName = self["deptname"]
+            exportBaseName += self["coursecode"]
+            exportBaseName += "_" + self["year"]
+            exportBaseName += self["semester"]
+        except:
+            pass
+        if exportBaseName!=None:
+            fileName = exportBaseName
+        else:
+            if templateName == "template":
+                templateName = "Default"
+        
+            fileName = os.path.split(path)[1]
+        fileName += "_" + templateName + ".zip"
+        toRepository = True
+    else:
+        #path = self.path
+        if self["package-path"]:
+            path = self["package-path"]
+            print "package-path='%s'" % path
+            deleteFirst = False
+        else:
+            path = self.pathToHere
+            if path=="":
+                path = "/"
+            # if exporting the root then also export the /home directory (to the root)
+            #   but after exporting the root (so that /home overwrites the root content
+            if path=="/":
+                exportHomeAlso = True
+        #print "path='%s'" % path
+        fileName = os.path.join(self.rep.exportPath, self.rep.name, path.strip("/"))
+    if (fileName==None) or (fileName==""):
+        fileName = "export"
+    
+    fullFileName = os.path.join(path, fileName)
+
+    ex = ice_export.iceExport(self)
+    
+    if fullFileName.endswith("/home"):
+        ex.export(path, fullFileName, toRepository, exportCallback, deleteFirst)
+        fullFileName = fullFileName[:-len("/home")]
+ 
+    ex.export(path, fullFileName, toRepository, exportCallback, deleteFirst)
+    if exportHomeAlso:
+        #print "*** Export Home as well"
+        packagePath = self["package-path"]  # Save
+        self["package-path"] = "/home"
+        export(self, exportBaseName=exportBaseName, exportCallback=exportCallback)
+        self["package-path"] = packagePath  # Restore
+    check_links(self)
+    
+    self["title"] = "Exported"
+    self["statusbar"] = "Exported <a href='%s'>%s</a>" % (fullFileName, fileName)
+    
+replaceFunction(export)
+
+
+# Disable 'get changes', 'sync' and 'export' when in the filemanager
+global isNotFileManager
+def isNotFileManager(self):
+    try:
+        v = self.newFormData.value("func")
+        if v=="file_manager":
+            return False
+    except:
+        return False
+    return True
+
+global workingOnLineAndNotFileManager
+def workingOnLineAndNotFileManager(self):
+    if self.workingOffline():
+        return False
+    try:
+        v = self.newFormData.value("func")
+        if v=="file_manager":
+            return False
+    except:
+        return False
+    return True
+       
+ex = getFunction("export")
+ex.enableIf = isNotFileManager
+up = getFunction("update")
+up.enableIf = workingOnLineAndNotFileManager
+sy = getFunction("sync")
+sy.enableIf = workingOnLineAndNotFileManager
 
 
 
