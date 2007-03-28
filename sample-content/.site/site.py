@@ -153,7 +153,7 @@ def export(self, exportBaseName=None, exportCallback=None):
     if (fileName==None) or (fileName==""):
         fileName = "export"
     
-    fullFileName = os.path.join(path, fileName)
+    fullFileName = os.path.join(path, fileName).replace("\\", "/")
 
     ex = ice_export.iceExport(self)
     
